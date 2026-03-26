@@ -137,6 +137,17 @@ Each region can be independently enabled or disabled. When a region is disabled,
 |---|---|---|
 | **Shared Machines** | `null` (follows money setting) | When enabled, all players share one forage pool — items are collected once for everyone. When disabled, each player's machine collects independently. By default, this follows the game's shared money setting. |
 
+**How per-player mode works:**
+
+In per-player mode, the **host** runs all collection at the start of each day. Forage is gathered into a pool and then distributed **round-robin** across all online players who have a placed Auto Forager. This means:
+
+- Each player receives a roughly equal share of the day's forage.
+- **Quality and double-harvest are rolled individually** per player using that player's own Foraging level and perks — a Level 10 Botanist gets Iridium quality on their share, while a Level 4 player gets mostly Normal/Silver.
+- **XP is granted individually** to each player for their share of the collection.
+- Ginger Island isolation still applies: island forage is only distributed among players with island machines, mainland forage among players with mainland machines.
+- If a player's machine is full, their items overflow to the next player in rotation.
+- Players who have not placed an Auto Forager do not participate in the distribution.
+
 ### Hotkeys
 
 | Setting | Default | Description |

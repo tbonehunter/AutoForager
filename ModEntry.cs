@@ -192,11 +192,18 @@ public class ModEntry : Mod
 
     private void OnDayStarted(object? sender, DayStartedEventArgs e)
     {
-        var machines = FindPlacedMachines();
-        if (machines.Count == 0)
+        // In multiplayer, only the host runs collection to avoid race conditions
+        if (Context.IsMultiplayer && !Context.IsMainPlayer)
             return;
 
-        var log = _collector.CollectAll(machines);
+        bool isSharedMode = !Context.IsMultiplayer
+            || (_config.SharedMachines ?? Game1.player.useSeparateWallets == false);
+
+        var machinesByPlayer = FindPlacedMachinesByPlayer(isSharedMode);
+        if (machinesByPlayer.Count == 0)
+            return;
+
+        var log = _collector.CollectAll(machinesByPlayer, isSharedMode);
         _lastDayLog = log;
 
         // No explicit save needed — items are in Chest.Items which the game persists
@@ -225,12 +232,18 @@ public class ModEntry : Mod
     }
 
     // -------------------------------------------------------------------------
-    // Machine discovery
+    // Machine discovery — grouped by player for multiplayer distribution
     // -------------------------------------------------------------------------
 
-    private List<MachineInfo> FindPlacedMachines()
+    /// <summary>
+    /// Finds all placed Auto Forager machines, grouped by owning player.
+    /// In shared mode (or single-player), all machines are grouped under the host.
+    /// In per-player mode, machines are grouped by their Owner modData tag.
+    /// </summary>
+    private Dictionary<Farmer, List<MachineInfo>> FindPlacedMachinesByPlayer(bool isSharedMode)
     {
-        var machines = new List<MachineInfo>();
+        var result = new Dictionary<Farmer, List<MachineInfo>>();
+        var onlineFarmers = Game1.getOnlineFarmers().ToDictionary(f => f.UniqueMultiplayerID);
 
         foreach (var location in Game1.locations)
         {
@@ -242,17 +255,21 @@ public class ModEntry : Mod
                 if (kvp.Value is not Chest chest)
                     continue;
 
-                bool isAutoForager = chest.ItemId == ContentInjector.AutoForagerId;
-
-                if (!isAutoForager)
+                if (chest.ItemId != ContentInjector.AutoForagerId)
                     continue;
 
-                // Check multiplayer ownership
-                if (!ShouldProcessMachine(chest))
-                    continue;
+                // Determine the owner
+                Farmer owner = Game1.player; // default to host
+                if (!isSharedMode
+                    && chest.modData.TryGetValue("tbonehunter.AutoForager/Owner", out string? ownerIdStr)
+                    && long.TryParse(ownerIdStr, out long ownerId)
+                    && onlineFarmers.TryGetValue(ownerId, out var farmer))
+                {
+                    owner = farmer;
+                }
 
                 const int maxSlots = 36;
-                machines.Add(new MachineInfo
+                var machine = new MachineInfo
                 {
                     HomeLocationName = location.Name,
                     HomeTile         = kvp.Key,
@@ -260,31 +277,16 @@ public class ModEntry : Mod
                     RemainingSlots   = maxSlots - chest.Items.Count,
                     Inventory        = chest.Items.ToList(),
                     PlacedChest      = chest
-                });
+                };
+
+                if (!result.ContainsKey(owner))
+                    result[owner] = new List<MachineInfo>();
+
+                result[owner].Add(machine);
             }
         }
 
-        return machines;
-    }
-
-    /// <summary>
-    /// Checks multiplayer ownership rules. In shared mode, any machine is processed.
-    /// In per-player mode, only machines placed by this player are processed.
-    /// </summary>
-    private bool ShouldProcessMachine(StardewValley.Object obj)
-    {
-        if (!Context.IsMultiplayer)
-            return true;
-
-        bool shared = _config.SharedMachines ?? Game1.player.useSeparateWallets == false;
-        if (shared)
-            return true;
-
-        // Per-player mode: check if this player placed the machine
-        if (obj.modData.TryGetValue("tbonehunter.AutoForager/Owner", out string? ownerId))
-            return ownerId == Game1.player.UniqueMultiplayerID.ToString();
-
-        return true; // no owner recorded, allow
+        return result;
     }
 
     // -------------------------------------------------------------------------

@@ -17,8 +17,8 @@ namespace AutoForager.Framework;
 
 /// <summary>
 /// Scans game locations and collects forageable items into machine inventories.
-/// Handles perk application (Botanist, Gatherer), quality upgrades for Heavy
-/// machines, and capacity limits.
+/// Handles perk application (Botanist, Gatherer), quality scaling by Foraging level,
+/// and fair round-robin distribution in multiplayer per-player mode.
 /// </summary>
 public class ForageCollector
 {
@@ -40,12 +40,25 @@ public class ForageCollector
         _config  = config;
     }
 
+    // =========================================================================
+    // Public entry point
+    // =========================================================================
+
     /// <summary>
-    /// Runs the daily collection cycle for all placed Auto Forager machines.
-    /// Returns the daily log of collected items.
+    /// Runs the daily collection cycle.
+    /// In shared mode (or single-player), all machines share one collection pass.
+    /// In per-player mode, forage is gathered into a pool and distributed
+    /// round-robin across players who own machines, with quality/perks rolled
+    /// per-player.
     /// </summary>
-    /// <param name="machines">All placed Auto Forager machines (normal and heavy).</param>
-    public DailyForageLog CollectAll(List<MachineInfo> machines)
+    /// <param name="machinesByPlayer">
+    /// Machines grouped by owner. Key = Farmer (owner), Value = list of that
+    /// player's machines. In shared mode, all machines are under the host farmer.
+    /// </param>
+    /// <param name="isSharedMode">Whether machines are shared (single pool) or per-player.</param>
+    public DailyForageLog CollectAll(
+        Dictionary<Farmer, List<MachineInfo>> machinesByPlayer,
+        bool isSharedMode)
     {
         var log = new DailyForageLog
         {
@@ -54,26 +67,29 @@ public class ForageCollector
             Year   = Game1.year
         };
 
-        if (machines.Count == 0)
+        if (machinesByPlayer.Count == 0)
             return log;
 
         bool enforceRestrictions = _config.EnforceProgressionRestrictions;
+        var allMachines = machinesByPlayer.Values.SelectMany(m => m).ToList();
 
         // Determine which locations to scan based on config and restrictions
-        var eligibleLocations = GetEligibleLocations(machines, enforceRestrictions);
+        var eligibleLocations = GetEligibleLocations(allMachines, enforceRestrictions);
         log.LocationsVisited = eligibleLocations.Count;
 
         _monitor.Log(
             _helper.Translation.Get("log.collecting", new { count = eligibleLocations.Count }),
             LogLevel.Debug);
 
-        // Process each machine in placement order
-        foreach (var machine in machines)
+        if (isSharedMode || machinesByPlayer.Count == 1)
         {
-            if (machine.RemainingSlots <= 0)
-                continue;
-
-            CollectForMachine(machine, eligibleLocations, log, enforceRestrictions);
+            // Shared mode or single player: collect directly into machines
+            CollectShared(allMachines, eligibleLocations, log);
+        }
+        else
+        {
+            // Per-player mode: gather pool, then distribute round-robin
+            CollectPerPlayer(machinesByPlayer, eligibleLocations, log);
         }
 
         log.TotalItems = log.Items.Sum(i => i.Stack);
@@ -86,17 +102,307 @@ public class ForageCollector
         return log;
     }
 
-    // -------------------------------------------------------------------------
-    // Collection for a single machine
-    // -------------------------------------------------------------------------
+    // =========================================================================
+    // Shared mode — original behavior, one pass for all machines
+    // =========================================================================
+
+    private void CollectShared(
+        List<MachineInfo> machines,
+        List<GameLocation> eligibleLocations,
+        DailyForageLog log)
+    {
+        foreach (var machine in machines)
+        {
+            if (machine.RemainingSlots <= 0)
+                continue;
+
+            CollectForMachine(machine, eligibleLocations, log, Game1.player);
+        }
+    }
+
+    // =========================================================================
+    // Per-player mode — gather pool, then distribute round-robin
+    // =========================================================================
+
+    /// <summary>
+    /// Represents a raw forage entry harvested from the world, before
+    /// player-specific quality/perk rolls are applied.
+    /// </summary>
+    private class RawForageEntry
+    {
+        public string ItemId { get; set; } = "";
+        public int BaseQuality { get; set; }
+        public string LocationName { get; set; } = "";
+        public string SourceType { get; set; } = "";
+        public bool IsIsland { get; set; }
+    }
+
+    private void CollectPerPlayer(
+        Dictionary<Farmer, List<MachineInfo>> machinesByPlayer,
+        List<GameLocation> eligibleLocations,
+        DailyForageLog log)
+    {
+        // Phase 1: Gather all forage into a raw pool, removing from the world
+        var mainlandPool = new List<RawForageEntry>();
+        var islandPool   = new List<RawForageEntry>();
+
+        foreach (var location in eligibleLocations)
+        {
+            bool locOnIsland = IsGingerIslandLocation(location.Name);
+            var targetPool = locOnIsland ? islandPool : mainlandPool;
+
+            if (_config.CollectGroundForage)
+                GatherGroundForage(location, targetPool);
+
+            if (_config.CollectForageCrops)
+                GatherForageCrops(location, targetPool);
+
+            if (_config.CollectBushes)
+                GatherBushes(location, targetPool);
+
+            if (_config.CollectGroundForage
+                && location.Name.Equals("IslandWest", StringComparison.OrdinalIgnoreCase))
+                GatherMusselStones(location, targetPool);
+        }
+
+        // Phase 2: Build list of participants per geographic zone
+        var mainlandParticipants = new List<(Farmer farmer, List<MachineInfo> machines)>();
+        var islandParticipants   = new List<(Farmer farmer, List<MachineInfo> machines)>();
+
+        foreach (var kvp in machinesByPlayer)
+        {
+            var mainlandMachines = kvp.Value.Where(m => !IsGingerIslandLocation(m.HomeLocationName)).ToList();
+            var islandMachines   = kvp.Value.Where(m =>  IsGingerIslandLocation(m.HomeLocationName)).ToList();
+
+            if (mainlandMachines.Count > 0)
+                mainlandParticipants.Add((kvp.Key, mainlandMachines));
+            if (islandMachines.Count > 0)
+                islandParticipants.Add((kvp.Key, islandMachines));
+        }
+
+        // Phase 3: Distribute round-robin
+        DistributePool(mainlandPool, mainlandParticipants, log);
+        DistributePool(islandPool,   islandParticipants,   log);
+    }
+
+    /// <summary>
+    /// Distributes a pool of raw forage entries round-robin across participants.
+    /// Quality and Gatherer double-harvest are rolled per-player.
+    /// </summary>
+    private void DistributePool(
+        List<RawForageEntry> pool,
+        List<(Farmer farmer, List<MachineInfo> machines)> participants,
+        DailyForageLog log)
+    {
+        if (pool.Count == 0 || participants.Count == 0)
+            return;
+
+        int playerIndex = 0;
+
+        foreach (var entry in pool)
+        {
+            // Find next participant with available machine capacity
+            bool assigned = false;
+            for (int attempts = 0; attempts < participants.Count; attempts++)
+            {
+                int idx = (playerIndex + attempts) % participants.Count;
+                var (farmer, machines) = participants[idx];
+
+                // Find a machine with room
+                var machine = machines.FirstOrDefault(m => m.RemainingSlots > 0);
+                if (machine == null)
+                    continue;
+
+                // Roll quality and perks for THIS player
+                bool hasBotanist  = _config.ApplyBotanist && farmer.professions.Contains(BotanistProfession);
+                bool hasGatherer  = _config.ApplyGatherer && farmer.professions.Contains(GathererProfession);
+                int  foragingLevel = farmer.ForagingLevel;
+
+                int quality = DetermineQuality(entry.BaseQuality, hasBotanist, foragingLevel);
+                int stack = hasGatherer && Game1.random.NextDouble() < 0.2 ? 2 : 1;
+
+                var item = CreateItem(entry.ItemId, quality, stack);
+                if (item == null)
+                    break;
+
+                if (machine.TryAddItem(item))
+                {
+                    log.Items.Add(new CollectedForageItem
+                    {
+                        QualifiedItemId = item.QualifiedItemId,
+                        ItemId          = entry.ItemId,
+                        DisplayName     = item.DisplayName,
+                        Stack           = stack,
+                        Quality         = quality,
+                        LocationName    = entry.LocationName,
+                        SourceType      = entry.SourceType
+                    });
+
+                    if (_config.GrantForagingXP)
+                        farmer.gainExperience(2, ForageXPPerItem);
+
+                    assigned = true;
+                }
+
+                break;
+            }
+
+            // Advance to next player regardless of success (fairness)
+            playerIndex = (playerIndex + 1) % participants.Count;
+
+            if (!assigned)
+            {
+                _monitor.Log($"Could not assign {entry.ItemId} from {entry.LocationName} — all machines full.", LogLevel.Trace);
+            }
+        }
+    }
+
+    // =========================================================================
+    // Gather methods — remove from world, add to raw pool (no quality roll yet)
+    // =========================================================================
+
+    private void GatherGroundForage(GameLocation location, List<RawForageEntry> pool)
+    {
+        var keys = new List<Vector2>();
+        foreach (var kvp in location.Objects.Pairs)
+        {
+            if (kvp.Value is StardewValley.Object obj && IsForageable(obj))
+                keys.Add(kvp.Key);
+        }
+
+        foreach (var tile in keys)
+        {
+            if (!location.Objects.TryGetValue(tile, out var obj))
+                continue;
+
+            pool.Add(new RawForageEntry
+            {
+                ItemId       = obj.ItemId,
+                BaseQuality  = obj.Quality,
+                LocationName = location.Name,
+                SourceType   = "Ground",
+                IsIsland     = IsGingerIslandLocation(location.Name)
+            });
+
+            location.Objects.Remove(tile);
+        }
+    }
+
+    private void GatherForageCrops(GameLocation location, List<RawForageEntry> pool)
+    {
+        var keys = new List<Vector2>();
+        foreach (var kvp in location.terrainFeatures.Pairs)
+        {
+            if (kvp.Value is HoeDirt dirt
+                && dirt.crop != null
+                && dirt.crop.forageCrop.Value
+                && (dirt.readyForHarvest()
+                    || dirt.crop.currentPhase.Value >= dirt.crop.phaseDays.Count - 1))
+            {
+                keys.Add(kvp.Key);
+            }
+        }
+
+        foreach (var tile in keys)
+        {
+            if (location.terrainFeatures[tile] is not HoeDirt dirt || dirt.crop == null)
+                continue;
+
+            string itemId = dirt.crop.whichForageCrop.Value switch
+            {
+                "1" => "399", // Spring Onion
+                "2" => "829", // Ginger
+                _   => ""
+            };
+            if (string.IsNullOrEmpty(itemId))
+                continue;
+
+            pool.Add(new RawForageEntry
+            {
+                ItemId       = itemId,
+                BaseQuality  = 0,
+                LocationName = location.Name,
+                SourceType   = "ForageCrop",
+                IsIsland     = IsGingerIslandLocation(location.Name)
+            });
+
+            dirt.destroyCrop(false);
+        }
+    }
+
+    private void GatherBushes(GameLocation location, List<RawForageEntry> pool)
+    {
+        foreach (var feature in location.largeTerrainFeatures)
+        {
+            if (feature is not Bush bush)
+                continue;
+
+            int bushType = bush.size.Value;
+            bool canProduce = bushType is Bush.mediumBush
+                                       or Bush.greenTeaBush
+                                       or Bush.walnutBush;
+            if (!canProduce || !bush.readyForHarvest())
+                continue;
+
+            string? produceId = bush.GetShakeOffItem();
+            if (produceId == null)
+                continue;
+
+            pool.Add(new RawForageEntry
+            {
+                ItemId       = produceId,
+                BaseQuality  = 0,
+                LocationName = location.Name,
+                SourceType   = "Bush",
+                IsIsland     = IsGingerIslandLocation(location.Name)
+            });
+
+            bush.tileSheetOffset.Value = 0;
+            bush.setUpSourceRect();
+        }
+    }
+
+    private void GatherMusselStones(GameLocation location, List<RawForageEntry> pool)
+    {
+        var keys = new List<Vector2>();
+        foreach (var kvp in location.Objects.Pairs)
+        {
+            if (kvp.Value is StardewValley.Object obj
+                && obj.ItemId == "25"
+                && obj.DisplayName == "Mussel Stone")
+            {
+                keys.Add(kvp.Key);
+            }
+        }
+
+        foreach (var tile in keys)
+        {
+            if (!location.Objects.ContainsKey(tile))
+                continue;
+
+            pool.Add(new RawForageEntry
+            {
+                ItemId       = "719",
+                BaseQuality  = 0,
+                LocationName = location.Name,
+                SourceType   = "MusselStone",
+                IsIsland     = true
+            });
+
+            location.Objects.Remove(tile);
+        }
+    }
+
+    // =========================================================================
+    // Shared-mode collection for a single machine (original direct approach)
+    // =========================================================================
 
     private void CollectForMachine(
         MachineInfo machine,
         List<GameLocation> locations,
         DailyForageLog log,
-        bool enforceRestrictions)
+        Farmer player)
     {
-        var player = Game1.player;
         bool hasBotanist  = _config.ApplyBotanist && player.professions.Contains(BotanistProfession);
         bool hasGatherer  = _config.ApplyGatherer && player.professions.Contains(GathererProfession);
         int  foragingLevel = player.ForagingLevel;
@@ -137,7 +443,7 @@ public class ForageCollector
     }
 
     // -------------------------------------------------------------------------
-    // Ground forageables
+    // Ground forageables (shared mode)
     // -------------------------------------------------------------------------
 
     private void CollectGroundForage(
