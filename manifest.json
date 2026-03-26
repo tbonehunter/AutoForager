@@ -1,0 +1,20 @@
+{
+  "Name": "Auto Forager",
+  "Author": "tbonehunter",
+  "Version": "1.0.1",
+  "Description": "Adds a craftable Auto Forager machine that roams the world and collects forageable items each day. Place it on the farm and let it do the work. Requires SV Data Extractor.",
+  "UniqueID": "tbonehunter.AutoForager",
+  "EntryDll": "AutoForager.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": [],
+  "Dependencies": [
+    {
+      "UniqueID": "tbonehunter.SVDataExtractor",
+      "IsRequired": true
+    },
+    {
+      "UniqueID": "spacechase0.GenericModConfigMenu",
+      "IsRequired": false
+    }
+  ]
+}
