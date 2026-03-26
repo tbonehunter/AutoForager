@@ -427,7 +427,8 @@ public class ForageCollector
 
     private static bool IsForageable(StardewValley.Object obj)
     {
-        return obj.Category == -81
+        return obj.IsSpawnedObject
+            || obj.Category == -81
             || obj.isForage()
             || (obj.GetContextTags()?.Contains("forage_item") == true);
     }
