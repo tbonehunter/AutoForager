@@ -17,23 +17,14 @@ A [Stardew Valley](https://www.stardewvalley.net/) mod that adds craftable **Aut
 2. Drop the `AutoForager` folder into your `Stardew Valley/Mods` directory.
 3. Launch the game.
 
-## Machines
+## Machine
 
-There are two tiers of Auto Forager machine, both crafted at a workbench:
-
-### Auto Forager
+The Auto Forager is crafted at a workbench:
 
 - **Unlocked at:** Foraging Level 3
 - **Recipe:** 15 Copper Ore, 50 Fiber, 1 Horseradish, 1 Leek, 1 Dandelion, 1 Salmonberry
-- **Inventory:** 32 slots
-- **Quality:** Preserves the natural quality of collected items
-
-### Heavy Auto Forager
-
-- **Unlocked at:** Foraging Level 7
-- **Recipe:** 15 Copper Ore, 15 Copper Bars, 50 Fiber, 1 Horseradish, 1 Leek, 1 Dandelion, 1 Salmonberry, 1 Blackberry, 1 Coconut
-- **Inventory:** 72 slots
-- **Quality:** All collected forage is **at least Gold quality** (or Iridium with the Botanist perk)
+- **Inventory:** 36 slots
+- **Quality:** Mirrors the vanilla foraging quality formula (see below)
 
 ## How It Works
 
@@ -61,6 +52,19 @@ The Auto Forager respects the player's Foraging skill perks:
 - **Foraging XP** — You earn 7 Foraging XP per item collected (toggleable).
 - **Botanist** (Level 10) — All auto-collected forage is upgraded to **Iridium quality**.
 - **Gatherer** (Level 5) — 20% chance to **double-harvest** each item.
+
+### Quality Scaling
+
+Forage quality is determined by the same formula the game uses when the player picks up forage by hand:
+
+| Foraging Level | Possible Quality |
+|---|---|
+| 0–3 | Normal only |
+| 4–7 | Chance of Silver (level/15) |
+| 8–9 | Chance of Silver or Gold (level/15, level/30) |
+| 10 + Botanist | Always Iridium |
+
+This means as your Foraging skill improves, the Auto Forager's output improves naturally — no machine upgrades needed.
 
 ## Ginger Island Isolation
 

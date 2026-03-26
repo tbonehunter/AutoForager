@@ -81,8 +81,7 @@ public class ModEntry : Mod
                 if (kvp.Value is Chest)
                     continue; // already a Chest, no migration needed
 
-                if (kvp.Value.ItemId == ContentInjector.AutoForagerId
-                    || kvp.Value.ItemId == ContentInjector.HeavyAutoForagerId)
+                if (kvp.Value.ItemId == ContentInjector.AutoForagerId)
                 {
                     tilesToSwap.Add(kvp.Key);
                 }
@@ -158,8 +157,7 @@ public class ModEntry : Mod
             if (obj is Chest)
                 continue; // already a Chest (e.g. from save load)
 
-            if (obj.ItemId != ContentInjector.AutoForagerId
-                && obj.ItemId != ContentInjector.HeavyAutoForagerId)
+            if (obj.ItemId != ContentInjector.AutoForagerId)
                 continue;
 
             var tile = pair.Key;
@@ -244,22 +242,20 @@ public class ModEntry : Mod
                 if (kvp.Value is not Chest chest)
                     continue;
 
-                bool isNormal = chest.ItemId == ContentInjector.AutoForagerId;
-                bool isHeavy  = chest.ItemId == ContentInjector.HeavyAutoForagerId;
+                bool isAutoForager = chest.ItemId == ContentInjector.AutoForagerId;
 
-                if (!isNormal && !isHeavy)
+                if (!isAutoForager)
                     continue;
 
                 // Check multiplayer ownership
                 if (!ShouldProcessMachine(chest))
                     continue;
 
-                int maxSlots = isHeavy ? 72 : 32;
+                const int maxSlots = 36;
                 machines.Add(new MachineInfo
                 {
                     HomeLocationName = location.Name,
                     HomeTile         = kvp.Key,
-                    IsHeavy          = isHeavy,
                     MaxSlots         = maxSlots,
                     RemainingSlots   = maxSlots - chest.Items.Count,
                     Inventory        = chest.Items.ToList(),

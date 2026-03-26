@@ -58,9 +58,7 @@
   "hud.not.placed": "Auto Forager cannot harvest forage until placed!",
 
   "machine.name": "Auto Forager",
-  "machine.name.heavy": "Heavy Auto Forager",
   "machine.description": "Place anywhere. Automatically collects forageable items from across the valley overnight.",
-  "machine.description.heavy": "An upgraded Auto Forager with more capacity. All forage collected is at least gold quality.",
 
   "log.title": "Last Day's Forage",
   "log.empty": "No forage was collected yesterday.",

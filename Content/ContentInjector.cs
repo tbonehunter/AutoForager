@@ -17,9 +17,8 @@ namespace AutoForager.Content;
 /// </summary>
 public class ContentInjector
 {
-    // Internal item IDs — prefixed with mod UniqueID to avoid conflicts
-    public const string AutoForagerId      = "tbonehunter.AutoForager_AutoForager";
-    public const string HeavyAutoForagerId = "tbonehunter.AutoForager_HeavyAutoForager";
+    // Internal item ID — prefixed with mod UniqueID to avoid conflicts
+    public const string AutoForagerId = "tbonehunter.AutoForager_AutoForager";
 
     private readonly IModHelper _helper;
 
@@ -42,9 +41,7 @@ public class ContentInjector
             e.LoadFrom(() => new Dictionary<string, string>
             {
                 ["machine.name"]              = _helper.Translation.Get("machine.name"),
-                ["machine.description"]       = _helper.Translation.Get("machine.description"),
-                ["machine.name.heavy"]        = _helper.Translation.Get("machine.name.heavy"),
-                ["machine.description.heavy"] = _helper.Translation.Get("machine.description.heavy")
+                ["machine.description"]       = _helper.Translation.Get("machine.description")
             }, AssetLoadPriority.Exclusive);
         }
 
@@ -67,17 +64,7 @@ public class ContentInjector
                     Fragility    = 0 // 0 = can be picked up with tools
                 };
 
-                data.Data[HeavyAutoForagerId] = new BigCraftableData
-                {
-                    Name         = HeavyAutoForagerId,
-                    DisplayName  = "[LocalizedText Strings\\tbonehunter.AutoForager:machine.name.heavy]",
-                    Description  = "[LocalizedText Strings\\tbonehunter.AutoForager:machine.description.heavy]",
-                    Texture      = $"Mods/{HeavyAutoForagerId}/BigCraftable",
-                    SpriteIndex  = 0,
-                    CanBePlacedOutdoors = true,
-                    CanBePlacedIndoors  = true,
-                    Fragility    = 0
-                };
+
             });
         }
 
@@ -98,12 +85,6 @@ public class ContentInjector
                     $"{AutoForagerId}/true" +                // output / isBigCraftable
                     "/Foraging 3";                           // unlock: Foraging Level 3
 
-                // Heavy Auto Forager: same as above + 15 Copper Bar (334), 1 Blackberry (410), 1 Coconut (88)
-                data.Data[HeavyAutoForagerId] =
-                    "378 15 334 15 771 50 16 1 20 1 22 1 296 1 410 1 88 1" +
-                    "/Home/" +
-                    $"{HeavyAutoForagerId}/true" +
-                    "/Foraging 7";
             });
         }
 
@@ -113,9 +94,6 @@ public class ContentInjector
             e.LoadFromModFile<Texture2D>("assets/auto-forager.png", AssetLoadPriority.Exclusive);
         }
 
-        if (e.NameWithoutLocale.IsEquivalentTo($"Mods/{HeavyAutoForagerId}/BigCraftable"))
-        {
-            e.LoadFromModFile<Texture2D>("assets/heavy-auto-forager.png", AssetLoadPriority.Exclusive);
-        }
+
     }
 }

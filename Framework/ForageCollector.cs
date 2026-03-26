@@ -99,7 +99,7 @@ public class ForageCollector
         var player = Game1.player;
         bool hasBotanist  = _config.ApplyBotanist && player.professions.Contains(BotanistProfession);
         bool hasGatherer  = _config.ApplyGatherer && player.professions.Contains(GathererProfession);
-        bool isHeavy      = machine.IsHeavy;
+        int  foragingLevel = player.ForagingLevel;
         bool machineOnIsland = IsGingerIslandLocation(machine.HomeLocationName);
 
         foreach (var location in locations)
@@ -119,20 +119,20 @@ public class ForageCollector
 
             // Ground forageables
             if (_config.CollectGroundForage)
-                CollectGroundForage(location, machine, log, hasBotanist, hasGatherer, isHeavy);
+                CollectGroundForage(location, machine, log, hasBotanist, hasGatherer, foragingLevel);
 
             // Forage crops
             if (_config.CollectForageCrops)
-                CollectForageCrops(location, machine, log, hasBotanist, hasGatherer, isHeavy);
+                CollectForageCrops(location, machine, log, hasBotanist, hasGatherer, foragingLevel);
 
             // Harvestable bushes
             if (_config.CollectBushes)
-                CollectBushes(location, machine, log, hasBotanist, hasGatherer, isHeavy);
+                CollectBushes(location, machine, log, hasBotanist, hasGatherer, foragingLevel);
 
             // Mussel stones (IslandWest beach only)
             if (_config.CollectGroundForage
                 && location.Name.Equals("IslandWest", StringComparison.OrdinalIgnoreCase))
-                CollectMusselStones(location, machine, log, hasBotanist, hasGatherer, isHeavy);
+                CollectMusselStones(location, machine, log, hasBotanist, hasGatherer, foragingLevel);
         }
     }
 
@@ -146,7 +146,7 @@ public class ForageCollector
         DailyForageLog log,
         bool hasBotanist,
         bool hasGatherer,
-        bool isHeavy)
+        int foragingLevel)
     {
         // Collect keys first to avoid modifying collection during iteration
         var forageKeys = new List<Vector2>();
@@ -164,7 +164,7 @@ public class ForageCollector
             if (!location.Objects.TryGetValue(tile, out var obj))
                 continue;
 
-            int quality = DetermineQuality(obj.Quality, hasBotanist, isHeavy);
+            int quality = DetermineQuality(obj.Quality, hasBotanist, foragingLevel);
             int stack = hasGatherer && Game1.random.NextDouble() < 0.2 ? 2 : 1;
 
             var item = CreateItem(obj.ItemId, quality, stack);
@@ -202,7 +202,7 @@ public class ForageCollector
         DailyForageLog log,
         bool hasBotanist,
         bool hasGatherer,
-        bool isHeavy)
+        int foragingLevel)
     {
         var cropKeys = new List<Vector2>();
         foreach (var kvp in location.terrainFeatures.Pairs)
@@ -234,7 +234,7 @@ public class ForageCollector
             if (string.IsNullOrEmpty(itemId))
                 continue;
 
-            int quality = DetermineQuality(0, hasBotanist, isHeavy);
+            int quality = DetermineQuality(0, hasBotanist, foragingLevel);
             int stack = hasGatherer && Game1.random.NextDouble() < 0.2 ? 2 : 1;
 
             var item = CreateItem(itemId, quality, stack);
@@ -273,7 +273,7 @@ public class ForageCollector
         DailyForageLog log,
         bool hasBotanist,
         bool hasGatherer,
-        bool isHeavy)
+        int foragingLevel)
     {
         foreach (var feature in location.largeTerrainFeatures)
         {
@@ -294,7 +294,7 @@ public class ForageCollector
             if (produceId == null)
                 continue;
 
-            int quality = DetermineQuality(0, hasBotanist, isHeavy);
+            int quality = DetermineQuality(0, hasBotanist, foragingLevel);
             int stack = hasGatherer && Game1.random.NextDouble() < 0.2 ? 2 : 1;
 
             var item = CreateItem(produceId, quality, stack);
@@ -336,7 +336,7 @@ public class ForageCollector
         DailyForageLog log,
         bool hasBotanist,
         bool hasGatherer,
-        bool isHeavy)
+        int foragingLevel)
     {
         var stoneKeys = new List<Vector2>();
         foreach (var kvp in location.Objects.Pairs)
@@ -357,7 +357,7 @@ public class ForageCollector
             if (!location.Objects.ContainsKey(tile))
                 continue;
 
-            int quality = DetermineQuality(0, hasBotanist, isHeavy);
+            int quality = DetermineQuality(0, hasBotanist, foragingLevel);
             int stack = hasGatherer && Game1.random.NextDouble() < 0.2 ? 2 : 1;
 
             var item = CreateItem("719", quality, stack); // Mussel
@@ -438,19 +438,31 @@ public class ForageCollector
     }
 
     /// <summary>
-    /// Determines final quality for an item:
-    /// - Heavy machine: minimum gold (2). If Botanist active, iridium (4).
-    /// - Normal machine: uses existing quality. If Botanist active, iridium (4).
+    /// Determines final quality for an item, mirroring the vanilla forage quality formula:
+    /// - Botanist perk: always Iridium (4)
+    /// - Otherwise: random roll based on Foraging level
+    ///   - Gold chance: foragingLevel / 30
+    ///   - Silver chance: foragingLevel / 15
+    ///   - Normal otherwise
+    /// Quality is always at least the item's base quality.
     /// </summary>
-    private static int DetermineQuality(int baseQuality, bool hasBotanist, bool isHeavy)
+    private static int DetermineQuality(int baseQuality, bool hasBotanist, int foragingLevel)
     {
         if (hasBotanist)
             return 4; // Iridium
 
-        if (isHeavy)
-            return Math.Max(baseQuality, 2); // Minimum gold
+        // Vanilla formula from GameLocation.checkForBuriedItem / Object forage logic
+        double roll = Game1.random.NextDouble();
+        int quality;
 
-        return baseQuality;
+        if (roll < foragingLevel / 30.0)
+            quality = 2; // Gold
+        else if (roll < foragingLevel / 15.0)
+            quality = 1; // Silver
+        else
+            quality = 0; // Normal
+
+        return Math.Max(baseQuality, quality);
     }
 
     private static StardewValley.Object? CreateItem(string itemId, int quality, int stack)
@@ -483,10 +495,7 @@ public class MachineInfo
     /// <summary>The tile position where this machine is placed.</summary>
     public Vector2 HomeTile { get; set; }
 
-    /// <summary>Whether this is a Heavy Auto Forager.</summary>
-    public bool IsHeavy { get; set; }
-
-    /// <summary>Maximum inventory slots (32 for normal, 72 for heavy).</summary>
+    /// <summary>Maximum inventory slots.</summary>
     public int MaxSlots { get; set; }
 
     /// <summary>Current remaining slots available.</summary>
